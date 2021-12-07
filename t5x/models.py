@@ -404,14 +404,19 @@ class EncoderDecoderModel(BaseTransformerModel):
       params: PyTreeDef,
       batch: Mapping[str, jnp.ndarray],
       dropout_rng: Optional[jnp.ndarray] = None,
-      mutable: flax_scope.CollectionFilter = False
+      mutable: flax_scope.CollectionFilter = False,
+      other_variables: Optional[PyTreeDef] = None,
   ) -> Union[jnp.ndarray, Tuple[jnp.ndarray, flax_scope.FrozenVariableDict]]:
     """Computes logits via a forward pass of `self.module_cls`."""
     # Dropout is provided only for the training mode.
     rngs = {'dropout': dropout_rng} if dropout_rng is not None else None
-
+    if other_variables is None:
+      other_variables = {}
     return self.module.apply(
-        {'params': params},
+        {
+            'params': params,
+            **other_variables
+        },
         batch['encoder_input_tokens'],
         batch['decoder_input_tokens'],
         batch['decoder_target_tokens'],
@@ -586,7 +591,7 @@ class EncoderDecoderModel(BaseTransformerModel):
 
     if return_intermediates:
       logits, modified_variables = self._compute_logits(
-          params=params, batch=batch, mutable=['intermediates'])
+          params=params, batch=batch, mutable=['intermediates', 'grads'])
 
       # Inside self.module, we called nn.Module.sow to track various
       # intermediate values. We extract them here.
@@ -601,6 +606,8 @@ class EncoderDecoderModel(BaseTransformerModel):
       # Note that the values are singleton tuples. This is because values inside
       # `intermediates` should be tuples tracking all instantiations of a value.
       # These values each have just one instantiation, hence singletons.
+      # TODO(bastings): Allow returning variables without piggyvacking.
+      intermediates['grads'] = modified_variables['grads']
     else:
       logits = self._compute_logits(params, batch)  # type: jnp.ndarray
 
